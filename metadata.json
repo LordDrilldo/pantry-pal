@@ -1,0 +1,5 @@
+{
+  "name": "Pantry Pal",
+  "description": "An intelligent food tracker that helps you manage your pantry, reduce food waste, and discover new recipes with the power of Gemini. Track your items, get expiration alerts, and let AI suggest what you can cook next.",
+  "requestFramePermissions": []
+}
