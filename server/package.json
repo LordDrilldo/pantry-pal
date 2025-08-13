@@ -19,8 +19,8 @@
     "express-rate-limit": "^7.5.0",
     "jsonwebtoken": "^9.0.2",
     "lowdb": "^7.0.1",
-    "uuid": "^11.1.0",
-    "ws": "^8.17.0"
+    "ws": "^8.17.0",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
