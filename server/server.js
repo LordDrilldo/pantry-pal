@@ -6,19 +6,22 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
-const { protect } = require('./auth');
 
 // --- Main async function to start the server ---
 async function startServer() {
-    // Dynamically import ESM modules
+    // Dynamically import ESM modules and initialize DB
     const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = await import('@google/generative-ai');
     const { dbPromise } = require('./db');
+    const { createProtectMiddleware } = require('./auth');
     
     // Await the db instance from the promise
     const db = await dbPromise;
 
+    // Create the protection middleware with the initialized DB
+    const protect = createProtectMiddleware(db);
+
     const app = express();
-    const port = process.env.PORT || 8080; // Cloud Run requires port 8080 by default
+    const port = process.env.PORT || 8080;
 
     // Middleware
     app.use(cors({
@@ -29,8 +32,6 @@ async function startServer() {
     app.use(cookieParser());
     
     // --- AUTH ROUTES ---
-
-    // @desc    Register a new user
     app.post('/api/auth/register', async (req, res) => {
         const { email, password } = req.body;
         if (!email || !password || password.length < 6) {
@@ -50,7 +51,6 @@ async function startServer() {
         res.status(201).json(userWithoutPassword);
     });
 
-    // @desc    Authenticate user & get token
     app.post('/api/auth/login', async (req, res) => {
         const { email, password } = req.body;
         await db.read();
@@ -64,13 +64,11 @@ async function startServer() {
         }
     });
 
-    // @desc    Logout user
     app.post('/api/auth/logout', (req, res) => {
         res.cookie('token', '', { httpOnly: true, expires: new Date(0) });
         res.status(200).json({ message: 'Logged out successfully' });
     });
 
-    // @desc    Get user profile
     app.get('/api/auth/me', protect, (req, res) => res.json(req.user));
 
     const generateTokenAndSetCookie = (res, userId) => {
@@ -84,7 +82,6 @@ async function startServer() {
     };
 
     // --- PANTRY ROUTES ---
-
     app.get('/api/pantry', protect, async (req, res) => {
         await db.read();
         const items = db.data.pantryItems.filter(item => item.userId === req.user.id);
@@ -97,8 +94,7 @@ async function startServer() {
             return res.status(400).json({ error: 'Missing required fields' });
         }
         const newItem = {
-            id: uuidv4(),
-            userId: req.user.id, name, quantity, unit, category,
+            id: uuidv4(), userId: req.user.id, name, quantity, unit, category,
             expirationDate, createdAt: new Date().toISOString(),
         };
         db.data.pantryItems.push(newItem);
@@ -148,7 +144,6 @@ async function startServer() {
 
     // --- RECIPE GENERATION ROUTE ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const recipeSchema = { /* ... schema definition ... */ }; // Schema definition is quite large, keeping it concise.
     
     app.post('/api/recipes/generate', protect, async (req, res) => {
         await db.read();
@@ -157,12 +152,13 @@ async function startServer() {
             return res.status(400).json({ error: 'Your pantry is empty.' });
         }
         const ingredientList = items.map(item => `${item.name} (${item.quantity} ${item.unit || ''})`.trim());
-        const prompt = `Based on these ingredients: ${ingredientList.join(', ')}, suggest a few creative recipes. Assume common staples like salt, oil, and water are available. Respond in JSON.`;
+        const prompt = `Based on these ingredients: ${ingredientList.join(', ')}, suggest a few creative recipes. Assume common staples are available. Respond only with a JSON array of recipe objects. Each object should have keys: "recipeName", "description", "ingredients" (an array of strings), and "instructions" (an array of strings).`;
 
         try {
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-            const result = await model.generateContent(prompt + " Provide the output in a JSON array format like this: [{\"recipeName\": \"...\", \"description\": \"...\", \"ingredients\": [\"...\"], \"instructions\": [\"...\"]}]");
-            const recipes = JSON.parse(result.response.text());
+            const result = await model.generateContent(prompt);
+            const text = result.response.text().replace(/```json|```/g, '').trim();
+            const recipes = JSON.parse(text);
             res.json(recipes);
         } catch (error) {
             console.error("Error generating recipes:", error);
